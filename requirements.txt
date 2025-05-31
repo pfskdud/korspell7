@@ -1,0 +1,7 @@
+os
+gradio
+platform
+pytesseract
+pdfplumber
+tempfile
+textwrap
