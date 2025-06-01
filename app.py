@@ -67,13 +67,29 @@ def handle_pdf_upload(file):
         return gr.update(value=f"[PDF OCR 오류] {str(e)}")
 
 # --- 검사 실행 함수 (교정 처리 포함) ---
+from api_connector import call_spellcheck_api, call_ocr_api
+
 def run_pipeline(input_type, pdf_file, image_file, input_text):
     try:
-        corrected_text = input_text  # 향후 맞춤법 교정 모델 연결 가능
-        return gr.update(value=corrected_text, visible=True)
-    except Exception as e:
-        return gr.update(value="[검사 오류 발생]", visible=True)
+        if input_type == "이미지" and image_file:
+            with open(image_file, "rb") as f:
+                image_bytes = f.read()
+            extracted_text = call_ocr_api(image_bytes)
+        elif input_type == "PDF" and pdf_file:
+            with open(pdf_file, "rb") as f:
+                pdf_bytes = f.read()
+            extracted_text = call_ocr_api(pdf_bytes)
+        else:
+            extracted_text = input_text
 
+        # 교정 API 호출
+        corrected_text, error_info = call_spellcheck_api(extracted_text)
+
+        return gr.update(value=corrected_text, visible=True), gr.update(value=error_info, visible=True)
+
+    except Exception as e:
+        return gr.update(value="[검사 오류 발생]", visible=True), gr.update(value=f"{str(e)}", visible=True)
+    
 # --- 초기화 함수 ---
 def clear_all():
     return "텍스트", "", "", None, None  # input_text, output_result, image_file, pdf_file
@@ -198,7 +214,7 @@ with gr.Blocks() as demo:
     # 검사 실행 클릭 
     submit_btn.click(fn=run_pipeline,
                      inputs=[input_type, pdf_file, image_file, input_text],
-                     outputs=[output_result])
+                     outputs=[output_result, output_error])
 
     # 초기화 버튼 클릭
     btn_clear.click(fn=clear_all, outputs=[input_type, input_text, output_result, image_file, pdf_file])
