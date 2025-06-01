@@ -169,7 +169,7 @@ def handle_pdf_upload(file):
         return gr.update(value=f"[PDF OCR 오류] {str(e)}")
 
 # --- 검사 실행 함수 (교정 처리 포함) ---
-from api_connector import call_spellcheck_api, call_ocr_api
+from api_connector import call_spellcheck_api
 
 def run_pipeline(input_type, pdf_file, image_file, input_text):
     try:
