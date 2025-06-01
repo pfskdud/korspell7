@@ -1,3 +1,5 @@
+# https://github.com/it-hxunzi/spellcheck-ocr-ui
+
 import gradio as gr
 # --- pdf추출에 필요한 패키지 임포트 ---
 import os
@@ -7,10 +9,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import tempfile, textwrap, os
-# --- OCR 처리 함수에서 넣어둔 패키지---
-# import pytesseract
-# from PIL import Image
-import pdfplumber
 # --- azure image OCR 처리 함수 ---
 from azure.ai.vision.imageanalysis import ImageAnalysisClient
 from azure.ai.vision.imageanalysis.models import VisualFeatures
@@ -18,13 +16,10 @@ from azure.core.credentials import AzureKeyCredential
 # --- azure pdf OCR 처리 함수 ---
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
-import numpy as np
 # --- env 함수 ---
 from dotenv import load_dotenv
 # --- 한국어만 필터링하기 위한 정규화 라이브러리 --
 import re
-
 
 # CSS 스타일 정의
 css_custom = """
@@ -53,7 +48,11 @@ css_custom = """
     </style>
 """
 
-# --- OCR 처리 함수들 ---
+# --- 한글 + roman num(논문 Pdf에서 많이 사용해서 예외적으로) 필터링하는 함수 ---
+def filter_korean_text(text):
+    return re.sub(r"[^가-힣0-9\s.,!?\u2160-\u216F]", "", text)
+
+# --- 이미지 OCR 처리 함수 ---
 def handle_image_upload(file):
     # env - endpoint/api key
     load_dotenv()
@@ -89,15 +88,18 @@ def handle_image_upload(file):
         if result.read:
             for block in result.read.blocks:
                 for line in block.lines:
-                    for word in line.words:
-                        filtered_text = filter_korean_text(word.text)
-                        extracted_lines.append(filtered_text)
-                        if filtered_text.strip():  # 공백이나 빈 문자열은 제외
-                            backend_data.append({
-                                "text": filtered_text,
-                                "polygon": word.bounding_polygon,
-                                "confidence": word.confidence
-                            })
+                    line_text = filter_korean_text(line.text)
+                    if line_text.strip():
+                        extracted_lines.append(line_text)
+
+                        for word in line.words:
+                            filtered_text = filter_korean_text(word.text)
+                            if filtered_text.strip():
+                                backend_data.append({
+                                    "text": filtered_text,
+                                    "polygon": word.bounding_polygon,
+                                    "confidence": word.confidence
+                                })
                             
         frontend_text = "\n".join(extracted_lines)
 
@@ -107,10 +109,6 @@ def handle_image_upload(file):
 
     except Exception as e:
         return gr.update(value=f"[이미지 OCR 오류] {str(e)}")
-    
-# --- 한글만 필터링하는 함수 ---
-def filter_korean_text(text):
-    return re.sub(r"[^가-힣0-9\s.,!?]", "", text)
 
 # --- pdf에서 줄이 달라지는 부분에서 강제적으로 줄바꿈되는 현상 ---
 def clean_linebreaks(text):
@@ -132,6 +130,25 @@ def clean_linebreaks(text):
 
     return ''.join(cleaned)
 
+# --- pdf 파일 구조 기반 수정 ---
+def parse_paragraphs_from_result(result):
+    # result.paragraphs는 이미 content 필드가 있으므로 바로 사용 가능
+    paragraphs = result.paragraphs
+    cleaned_paragraphs = []
+
+    for p in paragraphs:
+        text = p.content.strip()
+
+        # 페이지 넘버나 주석(예: "2 국어교육연구 제31집") 같은 것 제외
+        if len(text) < 5 or re.match(r"^\d+\s+[가-힣]", text):
+            continue
+        if text.startswith("*") or "제" in text and "집" in text:
+            continue
+
+        cleaned_paragraphs.append(text)
+
+    return "\n\n".join(cleaned_paragraphs)
+
 # --- pdf 파일 ocr ---
 def handle_pdf_upload(file):
     load_dotenv()
@@ -151,17 +168,13 @@ def handle_pdf_upload(file):
         return gr.update() #초기화버튼 클릭시 pdf 파일이 None으로 설정됨
     try:
         with open(file.name, "rb") as f:
-            poller = client.begin_analyze_document("prebuilt-read", f)
+            poller = client.begin_analyze_document("prebuilt-layout", f)
             result = poller.result()
+        
+        pretty_output = parse_paragraphs_from_result(result)
 
-        lines = []
-        for page in result.pages:
-            for line in page.lines:
-                filtered = filter_korean_text(line.content)
-                lines.append(filtered)
-
-        raw_text = "\n".join(lines)
-        cleaned_text = clean_linebreaks(raw_text)
+        filtered = filter_korean_text(pretty_output)
+        cleaned_text = clean_linebreaks(filtered)
 
         return gr.update(value=cleaned_text)
     
@@ -173,25 +186,18 @@ from api_connector import call_spellcheck_api
 
 def run_pipeline(input_type, pdf_file, image_file, input_text):
     try:
-        if input_type == "이미지" and image_file:
-            with open(image_file, "rb") as f:
-                image_bytes = f.read()
-            extracted_text = call_ocr_api(image_bytes)
-        elif input_type == "PDF" and pdf_file:
-            with open(pdf_file, "rb") as f:
-                pdf_bytes = f.read()
-            extracted_text = call_ocr_api(pdf_bytes)
-        else:
-            extracted_text = input_text
+        # OCR 결과는 이미 input_text에 들어있음
+        extracted_text = input_text
 
         # 교정 API 호출
         corrected_text, error_info = call_spellcheck_api(extracted_text)
 
-        return gr.update(value=corrected_text, visible=True), gr.update(value=error_info, visible=True)
+        # Gradio Textbox는 문자열만 필요!
+        return corrected_text, error_info
 
     except Exception as e:
-        return gr.update(value="[검사 오류 발생]", visible=True), gr.update(value=f"{str(e)}", visible=True)
-    
+        return "[검사 오류 발생]", str(e)
+
 # --- 초기화 함수 ---
 def clear_all():
     return "텍스트", "", "", None, None  # input_text, output_result, image_file, pdf_file
@@ -201,7 +207,6 @@ def clear_all():
 
 # --- pdf추출: 텍스트 PDF로 변환하는 함수 ---
 def text_to_pdf(text, font_size=12):
-    import platform
 
     # pdf추출 시 파일 내 폰트 오류
     system = platform.system()
@@ -259,7 +264,7 @@ with gr.Blocks() as demo:
     gr.HTML(css_custom)
 
     gr.Markdown("## OCR 기반 한국어 맞춤법 교정 챗봇 시스템")
-            
+    hidden_backend_data = gr.State()        
 
     with gr.Row(elem_classes="fixed-container"):
             
@@ -308,9 +313,9 @@ with gr.Blocks() as demo:
         }
 
     input_type.change(fn=toggle_inputs, inputs=input_type, outputs=[image_row, pdf_row])
-
+    
     # 이미지 또는 PDF 업로드 시 텍스트 자동 채우기
-    image_file.change(fn=handle_image_upload, inputs=image_file, outputs=input_text)
+    image_file.change(fn=handle_image_upload, inputs=image_file, outputs=[input_text, hidden_backend_data])
     pdf_file.change(fn=handle_pdf_upload, inputs=pdf_file, outputs=input_text)
 
     # 검사 실행 클릭 
