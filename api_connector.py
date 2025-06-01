@@ -9,29 +9,6 @@ client = AzureOpenAI(
     azure_endpoint=st.secrets["openai_endpoint"]
 )
 
-# OCR API 정보
-OCR_ENDPOINT = st.secrets["ocr_endpoint"]
-OCR_KEY = st.secrets["ocr_key"]
-
-# OCR 함수
-def call_ocr_api(image_bytes):
-    ocr_url = f"{OCR_ENDPOINT}/vision/v3.2/ocr?language=ko&detectOrientation=true"
-    headers = {
-        'Ocp-Apim-Subscription-Key': OCR_KEY,
-        'Content-Type': 'application/octet-stream'
-    }
-
-    response = requests.post(ocr_url, headers=headers, data=image_bytes)
-    response.raise_for_status()
-    result = response.json()
-
-    text = []
-    for region in result.get("regions", []):
-        for line in region.get("lines", []):
-            words = [word["text"] for word in line.get("words", [])]
-            text.append(" ".join(words))
-    return "\n".join(text)
-
 # 맞춤법 교정 함수
 def call_spellcheck_api(text):
     response = client.chat.completions.create(

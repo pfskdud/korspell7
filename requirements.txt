@@ -1,7 +1,13 @@
+numpy>=1.23
+azure-ai-documentintelligence
+azure-ai-vision-imageanalysis
+azure-core
+python-dotenv
 gradio
-requests
-openai
 pytesseract
 pdfplumber
-Pillow
 reportlab
+pillow
+streamlit
+openai
+requests
