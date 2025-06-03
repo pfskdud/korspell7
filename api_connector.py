@@ -15,7 +15,7 @@ def call_spellcheck_api(text):
     azure_search_key = os.getenv("AZURE_SEARCH_KEY")
     azure_search_index = os.getenv("AZURE_SEARCH_INDEX")
 
-    # 1️⃣ Azure Cognitive Search 호출
+    # Azure Cognitive Search 호출
     search_url = f"{azure_search_endpoint}/indexes/{azure_search_index}/docs/search?api-version=2021-04-30-Preview"
     search_headers = {
         "api-key": azure_search_key,
@@ -35,8 +35,27 @@ def call_spellcheck_api(text):
     except Exception as e:
         return f"Search API 오류: {e}", f"검색 실패"
 
-    # 2️⃣ Chat Completion 호출
-    system_prompt = "너는 한국어 맞춤법 교정 전문가야. 문장의 오탈자 및 문맥 오류를 교정해줘."
+    # Chat Completion 호출
+    system_prompt = """
+당신은 한국어 맞춤법 전문가 입니다. 사용자가 문법적으로 올바르지 않은 문장을 입력하면 이를 교정하고 다음 형식으로 출력하세요. 입력받은 문장이 올바르거나, 검색 인덱스에서 적절한 결과를 찾지 못했을 경우 입력된 문장과 교정된 문장이 같도록 하고, 오류는 빈 문자열로 처리하세요. 입력이 문장 형식이 아닐 경우 문장 부호에 대한 교정은 이루어지지 않도록 하세요. 출력은 반드시 아래 예시와 같이 작성해야 합니다. 추가적인 설명이나 다른 형식은 포함하지 마세요.
+
+출력 형태 예시:
+
+{
+    "입력": "교수님이 좋으셔서 정밀 다행이야",
+    "교정": "교수님이 좋으셔서 정말 다행이야.",
+    "오류": "오타, 문장부호"
+}
+
+오류 항목에는 해당 문장에서 발견한 오류 종류를 쉼표로 구분하여 적어주세요.
+
+오류 종류 예시:
+
+- 띄어쓰기
+- 문장부호
+- 유사 모양
+- 유사 발음
+"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -44,7 +63,7 @@ def call_spellcheck_api(text):
         {"role": "user", "content": text}
     ]
 
-    url = f"{azure_oai_endpoint}/openai/deployments/{azure_oai_deployment}/chat/completions?api-version=2024-02-15-preview"
+    url = f"{azure_oai_endpoint}/openai/deployments/{azure_oai_deployment}/chat/completions?api-version=2025-01-01-preview"
     headers = {
         "Content-Type": "application/json",
         "api-key": azure_oai_key
@@ -60,6 +79,20 @@ def call_spellcheck_api(text):
         response.raise_for_status()
         result = response.json()
         content = result["choices"][0]["message"]["content"]
-        return content, "교정 성공"
+
+        # JSON 파싱
+        import re
+        try:
+            # 코드 블록 제거 및 중괄호 내부만 추출
+            content = content.replace("```json", "").replace("```", "").strip()
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                content = match.group(0)
+
+            data = json.loads(content)
+            return data.get("교정", ""), data.get("오류", "")
+        except Exception as e:
+            return content, f"JSON 파싱 오류: {str(e)}"
+
     except Exception as e:
         return f"API 오류: {e}", "Chat Completion 호출 실패"
