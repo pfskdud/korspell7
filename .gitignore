@@ -14,3 +14,4 @@ __pycache__/
 # 임시 작업 파일 (필요하면 유지, 필요 없으면 삭제)
 ocr_img.py
 ocr_pdf.py
+model/
