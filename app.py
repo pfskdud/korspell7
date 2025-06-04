@@ -1,11 +1,12 @@
 # https://github.com/it-hxunzi/spellcheck-ocr-ui
+# https://github.com/pse9684/KorSpell
 
 import gradio as gr
 # --- pdf추출에 필요한 패키지 임포트 ---
 import os
 import platform
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, portrait
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import tempfile, textwrap, os
@@ -35,11 +36,11 @@ css_custom = """
             height: 70px !important;
             display: inline-block;
         }
-        .result-box {
-            overflow-y: auto;
-            height: 380px !important;
-            display: inline-block;
-        }
+        .result-box textarea {
+        max_height: 380px !important;
+        overflow-y: auto !important;
+        white-space: pre-wrap !important;
+    }
         .error-box {
             overflow-y: auto;
             height: 380px !important;
@@ -176,7 +177,9 @@ def handle_pdf_upload(file):
         filtered = filter_korean_text(pretty_output)
         cleaned_text = clean_linebreaks(filtered)
 
-        return gr.update(value=cleaned_text)
+        trimmed_text = cleaned_text[:790]
+
+        return gr.update(value=trimmed_text)
     
     except Exception as e:
         return gr.update(value=f"[PDF OCR 오류] {str(e)}")
@@ -186,13 +189,9 @@ from api_connector import call_spellcheck_api
 
 def run_pipeline(input_type, pdf_file, image_file, input_text):
     try:
-        # OCR 결과는 이미 input_text에 들어있음
         extracted_text = input_text
-
-        # 교정 API 호출
         corrected_text, error_info = call_spellcheck_api(extracted_text)
 
-        # Gradio Textbox는 문자열만 필요!
         return corrected_text, error_info
 
     except Exception as e:
@@ -226,7 +225,7 @@ def text_to_pdf(text, font_size=12):
         pdfmetrics.registerFont(TTFont(font_name, font_path))
 
     temp_path = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False).name
-    c = canvas.Canvas(temp_path, pagesize=A4)
+    c = canvas.Canvas(temp_path, pagesize=portrait(A4))
     width, height = A4
 
     c.setFont(font_name, font_size)
@@ -236,7 +235,7 @@ def text_to_pdf(text, font_size=12):
     line_height = font_size + 6
     page_num = 1
 
-    lines = textwrap.wrap(text, width=90)
+    lines = textwrap.wrap(text, width=50)
 
     for line in lines:
         c.drawString(x, y, line)
@@ -278,7 +277,7 @@ with gr.Blocks() as demo:
             with gr.Row(visible=False) as pdf_row:
                 pdf_file = gr.File(type="filepath", label="PDF 업로드", file_types=[".pdf"], scale=1, elem_classes="file-upload-container")
 
-            input_text = gr.Textbox(label="검사할 문장을 입력하세요.", placeholder="여기에 문장을 입력해주세요...", lines=9, visible=True)
+            input_text = gr.Textbox(label="검사할 문장을 입력하세요.", placeholder="여기에 문장을 입력해주세요... (790자 제한)", lines=9, visible=True, max_length=790)
             submit_btn = gr.Button("검사 실행")
 
             with gr.Row():
@@ -288,13 +287,14 @@ with gr.Blocks() as demo:
         with gr.Column():
             gr.Markdown("### 교정 결과")
 
-            output_result = gr.Textbox(
+            output_result = gr.TextArea(
                 label="",
                 interactive=True,
                 visible=True,
                 lines=16,
                 scale=1,
-                elem_classes="result-box"
+                elem_classes="result-box",
+                container=True
             )
 
             with gr.Row():

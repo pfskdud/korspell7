@@ -95,4 +95,10 @@ def call_spellcheck_api(text):
             return content, f"JSON 파싱 오류: {str(e)}"
 
     except Exception as e:
-        return f"API 오류: {e}", "Chat Completion 호출 실패"
+        if "400 Client Error" in str(e) and "Bad Request" in str(e):
+            return "교정 실패", "죄송합니다. 비속어가 포함된 문장은 교정할 수 없습니다."
+        elif 'content' in str(e):
+            return "교정 실패", "죄송합니다. 폭력, 혐오, 선정적, 자해 등의 내용을 포함한 문장은 교정할 수 없습니다."
+        else:
+            print(e)
+            return "교정 실패", "교정에 실패했습니다."
